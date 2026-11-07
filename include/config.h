@@ -24,7 +24,7 @@ constexpr uint8_t MC_STOP_PWM = 255;
 constexpr int MB_STOP_US = 1500;
 constexpr int MB_RUN_US = 2000;
 constexpr int MD_STOP_US = 1500;
-constexpr int MD_RUN_US = 1700;
+constexpr int MD_RUN_US = 1600;
 
 constexpr unsigned long MD_RUN_TIME_MS = 600UL;
 constexpr unsigned long MD_STOP_TIME_MS = 1000UL;
