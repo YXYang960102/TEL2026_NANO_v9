@@ -18,9 +18,9 @@ unsigned long startupTime = 0;
 unsigned long lastSampleTime = 0;
 unsigned long lastReportTime = 0;
 
-bool saBallSeen = false;
-bool saHighTiming = false;
-unsigned long saHighStartTime = 0;
+unsigned long feedStartTime = 0;
+bool feedClearing = false;
+unsigned long clearStartTime = 0;
 
 bool systemDisabled = false;
 bool dr2HighTiming = false;
@@ -28,7 +28,9 @@ bool dr2LowTiming = false;
 unsigned long dr2HighStartTime = 0;
 unsigned long dr2LowStartTime = 0;
 
-bool mdRunPhase = true;
+// MD's cycle: forward, backward, a short stop, forward again.
+enum MdPhase : uint8_t { MD_FORWARD, MD_REVERSE, MD_PAUSE };
+MdPhase mdPhase = MD_FORWARD;
 unsigned long mdPhaseStartTime = 0;
 
 uint8_t maOutput = MA_STOP_PWM;
@@ -74,11 +76,12 @@ bool updateInput(DebouncedInput &input, bool rawState) {
     return false;
 }
 
-void processDr1Event(bool previousState) {
+void processDr1Event(bool previousState, unsigned long now) {
     if (systemDisabled) return;
 
     if (previousState == LOW && dr1Input.stableState == HIGH) {
         if (saInput.stableState == LOW || sbInput.stableState == LOW) {
+            if (need_pieces == 0) feedStartTime = now;
             need_pieces++;
             Serial.print(F("[EVENT] DR1 ADD, need_pieces="));
             Serial.println(need_pieces);
@@ -88,33 +91,30 @@ void processDr1Event(bool previousState) {
     }
 }
 
+// A ball left SA (LOW -> HIGH): that request is done, even if the next ball
+// is already right behind it.
 void processSaStableChange(bool previousState, unsigned long now) {
-    if (saInput.stableState == LOW) {
-        saBallSeen = true;
-        saHighTiming = false;
-        return;
-    }
-
-    if (saBallSeen && previousState == LOW && saInput.stableState == HIGH) {
-        saHighTiming = true;
-        saHighStartTime = now;
+    if (previousState == LOW && saInput.stableState == HIGH && need_pieces > 0) {
+        need_pieces--;
+        feedStartTime = now;
+        if (need_pieces == 0) {
+            feedClearing = true; // MA on for CLEAR_MS more, MB still stopped
+            clearStartTime = now;
+        }
+        Serial.print(F("[EVENT] SA ball left, need_pieces="));
+        Serial.println(need_pieces);
     }
 }
 
-void updateSaHighConfirm(unsigned long now) {
-    if (!saBallSeen || !saHighTiming) return;
-
-    if (saInput.stableState == LOW) {
-        saHighTiming = false;
-        return;
+void updateFeedTimeout(unsigned long now) {
+    if (need_pieces > 0 && now - feedStartTime >= FEED_TIMEOUT_MS) {
+        need_pieces = 0;
+        feedClearing = false; // stuck: stop pushing, no clear time
+        Serial.println(F("[EVENT] feed timeout, need_pieces=0"));
     }
-
-    if (now - saHighStartTime >= SA_HIGH_CONFIRM_TIME_MS) {
-        if (need_pieces > 0) need_pieces--;
-        Serial.print(F("[EVENT] SA HIGH 0.5s, need_pieces="));
-        Serial.println(need_pieces);
-        saBallSeen = false;
-        saHighTiming = false;
+    if (feedClearing && now - clearStartTime >= CLEAR_MS) {
+        feedClearing = false;
+        Serial.println(F("[EVENT] clear done"));
     }
 }
 
@@ -128,6 +128,7 @@ void updateDr2DisableLogic(unsigned long now) {
             if (now - dr2HighStartTime >= DR2_STOP_HIGH_TIME_MS) {
                 systemDisabled = true;
                 need_pieces = 0;
+                feedClearing = false;
                 dr2HighTiming = false;
                 dr2LowTiming = false;
                 Serial.println(F("[DISABLE] DR2 HIGH > 50ms"));
@@ -166,13 +167,13 @@ void sampleInputs(unsigned long now) {
 
     previousState = dr1Input.stableState;
     if (updateInput(dr1Input, readInput(PIN_DR1))) {
-        processDr1Event(previousState);
+        processDr1Event(previousState, now);
     }
 
-    updateSaHighConfirm(now);
+    updateFeedTimeout(now);
 }
 
-// DW1 -> Mega D14: one 100 ms pulse per ball (Mega counts rising edges).
+// DW1 -> Mega A14: one 100 ms pulse per ball (Mega counts rising edges).
 // Pulse when a ball arrives at SA/SB while enabled, or on enable with a ball already there.
 void updateDw1(unsigned long now) {
     const bool ballPresent = (saInput.stableState == LOW) || (sbInput.stableState == LOW);
@@ -196,7 +197,7 @@ void updateDw1(unsigned long now) {
 
 void updateMdOutput(unsigned long now, bool escReady) {
     if (!escReady || systemDisabled) {
-        mdRunPhase = true;
+        mdPhase = MD_FORWARD;
         mdPhaseStartTime = now;
         mdOutputUs = MD_STOP_US;
         mdEsc.writeMicroseconds(mdOutputUs);
@@ -204,28 +205,33 @@ void updateMdOutput(unsigned long now, bool escReady) {
     }
 
     if (sdInput.stableState == LOW) {
-        mdRunPhase = true;
+        mdPhase = MD_FORWARD;
         mdPhaseStartTime = now;
         mdOutputUs = MD_STOP_US;
         mdEsc.writeMicroseconds(mdOutputUs);
         return;
     }
 
-    if (mdRunPhase) {
+    if (mdPhase == MD_FORWARD) {
         mdOutputUs = MD_RUN_US;
-        mdEsc.writeMicroseconds(mdOutputUs);
         if (now - mdPhaseStartTime >= MD_RUN_TIME_MS) {
-            mdRunPhase = false;
+            mdPhase = MD_REVERSE;
+            mdPhaseStartTime = now;
+        }
+    } else if (mdPhase == MD_REVERSE) {
+        mdOutputUs = MD_REVERSE_US; // backward, not stopped (2026-11-08)
+        if (now - mdPhaseStartTime >= MD_REVERSE_TIME_MS) {
+            mdPhase = MD_PAUSE;
             mdPhaseStartTime = now;
         }
     } else {
-        mdOutputUs = MD_STOP_US;
-        mdEsc.writeMicroseconds(mdOutputUs);
-        if (now - mdPhaseStartTime >= MD_STOP_TIME_MS) {
-            mdRunPhase = true;
+        mdOutputUs = MD_STOP_US; // stopped between backward and forward
+        if (now - mdPhaseStartTime >= MD_PAUSE_TIME_MS) {
+            mdPhase = MD_FORWARD;
             mdPhaseStartTime = now;
         }
     }
+    mdEsc.writeMicroseconds(mdOutputUs);
 }
 
 void stopAllMotors(unsigned long now) {
@@ -239,7 +245,7 @@ void stopAllMotors(unsigned long now) {
     mbEsc.writeMicroseconds(mbOutputUs);
     mdEsc.writeMicroseconds(mdOutputUs);
 
-    mdRunPhase = true;
+    mdPhase = MD_FORWARD;
     mdPhaseStartTime = now;
 }
 
@@ -251,7 +257,10 @@ void updateMotorOutputs(unsigned long now) {
         return;
     }
 
-    if (need_pieces > 0) {
+    // Firing: from the request until CLEAR_MS after the ball left SA.
+    const bool firing = need_pieces > 0 || feedClearing;
+
+    if (firing) {
         maOutput = MA_RUN_PWM;
     } else if (saInput.stableState == HIGH && sbInput.stableState == HIGH) {
         maOutput = MA_SLOW_PWM;
@@ -259,8 +268,10 @@ void updateMotorOutputs(unsigned long now) {
         maOutput = MA_STOP_PWM;
     }
 
-    if ((saInput.stableState == HIGH && sbInput.stableState == HIGH) ||
-        scInput.stableState == HIGH) {
+    if (firing) {
+        mbOutputUs = MB_STOP_US; // don't push the next ball into the one leaving
+    } else if ((saInput.stableState == HIGH && sbInput.stableState == HIGH) ||
+               scInput.stableState == HIGH) {
         mbOutputUs = MB_RUN_US;
     } else {
         mbOutputUs = MB_STOP_US;
