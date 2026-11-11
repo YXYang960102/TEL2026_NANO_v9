@@ -24,12 +24,12 @@ constexpr uint8_t MC_STOP_PWM = 255;
 constexpr int MB_STOP_US = 1500;
 constexpr int MB_RUN_US = 2000;
 constexpr int MD_STOP_US = 1500;
-constexpr int MD_RUN_US = 1600;
+constexpr int MD_RUN_US = 1800;
 // The off part of MD's cycle turns it backward now (Jeremy, 2026-11-08; it
 // used to stop, MD_STOP_US, for 600 ms): forward MD_RUN_US for
 // MD_RUN_TIME_MS, backward MD_REVERSE_US for MD_REVERSE_TIME_MS, stopped
 // (MD_STOP_US) for MD_PAUSE_TIME_MS before forward again.
-constexpr int MD_REVERSE_US = 1400;
+constexpr int MD_REVERSE_US = 1200;
 
 constexpr unsigned long MD_RUN_TIME_MS = 600UL;
 constexpr unsigned long MD_REVERSE_TIME_MS = 300UL;
