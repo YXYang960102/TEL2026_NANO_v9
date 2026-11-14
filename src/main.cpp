@@ -42,6 +42,7 @@ bool dw1PulseActive = false;
 unsigned long dw1PulseStartTime = 0;
 bool dw1BallWasPresent = false;
 bool dw1WasEnabled = false;
+bool dw1WasFiring = false;
 
 bool readInput(uint8_t pin) {
     return digitalRead(pin) == HIGH;
@@ -80,9 +81,15 @@ void processDr1Event(bool previousState, unsigned long now) {
     if (systemDisabled) return;
 
     if (previousState == LOW && dr1Input.stableState == HIGH) {
-        if (saInput.stableState == LOW || sbInput.stableState == LOW) {
-            if (need_pieces == 0) feedStartTime = now;
-            need_pieces++;
+        if (need_pieces > 0) {
+            // The last requested ball has not left SA yet: it is stuck. Do
+            // not queue a second one (2026-11-14, Jeremy: two balls went out
+            // on one press once the jam cleared); FEED_TIMEOUT_MS still
+            // counts from the first request.
+            Serial.println(F("[EVENT] DR1 while ball still at SA: jam, not added"));
+        } else if (saInput.stableState == LOW || sbInput.stableState == LOW) {
+            feedStartTime = now;
+            need_pieces = 1;
             Serial.print(F("[EVENT] DR1 ADD, need_pieces="));
             Serial.println(need_pieces);
         } else {
@@ -179,13 +186,22 @@ void updateDw1(unsigned long now) {
     const bool ballPresent = (saInput.stableState == LOW) || (sbInput.stableState == LOW);
     const bool enabled = !systemDisabled;
 
-    if (enabled && ballPresent && (!dw1BallWasPresent || !dw1WasEnabled) && !dw1PulseActive) {
+    // A fire just finished (feed + clear time, or the feed timeout) with a
+    // ball still at the top: pulse again (2026-11-14). The next ball can sit
+    // right behind the one that left, so SA/SB may never read empty and the
+    // arrival pulse above would not come; the Mega cleared its "ball ready"
+    // at the fire and would wait for good. An extra pulse while the Mega
+    // already has one latched is not counted twice there.
+    const bool firing = need_pieces > 0 || feedClearing;
+    const bool fireEnded = dw1WasFiring && !firing;
+    if (enabled && ballPresent && (!dw1BallWasPresent || !dw1WasEnabled || fireEnded) && !dw1PulseActive) {
         dw1PulseActive = true;
         dw1PulseStartTime = now;
-        Serial.println(F("[EVENT] DW1 ready pulse"));
+        Serial.println(fireEnded ? F("[EVENT] DW1 ready pulse (after fire)") : F("[EVENT] DW1 ready pulse"));
     }
     dw1BallWasPresent = ballPresent;
     dw1WasEnabled = enabled;
+    dw1WasFiring = firing;
 
     if (dw1PulseActive && now - dw1PulseStartTime >= DW1_PULSE_TIME_MS) {
         dw1PulseActive = false;
