@@ -229,7 +229,9 @@ void updateMdOutput(unsigned long now, bool escReady) {
     }
 
     if (mdPhase == MD_FORWARD) {
-        mdOutputUs = MD_RUN_US;
+        // MB stopped (firing, or SA/SB full with SC low): slower forward
+        // (2026-11-15). mbOutputUs is this loop's, set just before.
+        mdOutputUs = mbOutputUs == MB_STOP_US ? MD_RUN_SLOW_US : MD_RUN_US;
         if (now - mdPhaseStartTime >= MD_RUN_TIME_MS) {
             mdPhase = MD_REVERSE;
             mdPhaseStartTime = now;

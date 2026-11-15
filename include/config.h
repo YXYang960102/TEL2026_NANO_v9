@@ -25,6 +25,10 @@ constexpr int MB_STOP_US = 1500;
 constexpr int MB_RUN_US = 2000;
 constexpr int MD_STOP_US = 1500;
 constexpr int MD_RUN_US = 1800;
+// Forward while MB is stopped (Jeremy, 2026-11-15): the storage tower then
+// pushes into a lift that isn't taking balls, so MD goes forward slower.
+// PROVISIONAL: 1700 = 200 us forward instead of 300 (1500 = stop).
+constexpr int MD_RUN_SLOW_US = 1700;
 // The off part of MD's cycle turns it backward now (Jeremy, 2026-11-08; it
 // used to stop, MD_STOP_US, for 600 ms): forward MD_RUN_US for
 // MD_RUN_TIME_MS, backward MD_REVERSE_US for MD_REVERSE_TIME_MS, stopped
