@@ -35,8 +35,8 @@ constexpr int MD_RUN_SLOW_US = 1700;
 // (MD_STOP_US) for MD_PAUSE_TIME_MS before forward again.
 constexpr int MD_REVERSE_US = 1200;
 
-constexpr unsigned long MD_RUN_TIME_MS = 450UL; // was 600 (2026-11-18, 1/4 shorter)
-constexpr unsigned long MD_REVERSE_TIME_MS = 225UL; // was 300 (2026-11-18, 1/4 shorter)
+constexpr unsigned long MD_RUN_TIME_MS = 338UL; // 600 -> 450 -> 338 (2026-11-18, 1/4 shorter twice)
+constexpr unsigned long MD_REVERSE_TIME_MS = 169UL; // 300 -> 225 -> 169 (2026-11-18, 1/4 shorter twice)
 constexpr unsigned long MD_PAUSE_TIME_MS = 50UL;
 constexpr unsigned long ESC_STARTUP_TIME_MS = 3000UL;
 constexpr unsigned long INPUT_SAMPLE_INTERVAL_MS = 5UL;
